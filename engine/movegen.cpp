@@ -92,6 +92,18 @@ uint64_t rook_attacks(int sq, uint64_t occupied)
     return slide(sq, occupied, ROOK_DIRECTIONS);
 }
 
+// Every square a pawn of color `c` standing on `sq` attacks.
+uint64_t pawn_attacks(Color c, int sq)
+{
+    uint64_t b = 1ULL << sq;
+    if (c == WHITE)
+        return ((b & ~FILE_A) << 7)    // up-left
+             | ((b & ~FILE_H) << 9);   // up-right
+    else
+        return ((b & ~FILE_A) >> 9)    // down-left
+             | ((b & ~FILE_H) >> 7);   // down-right
+}
+
 // Every square a piece of `type` on `sq` attacks, given the board's occupancy.
 // Pawns are handled separately, since they move differently than they capture.
 uint64_t attacks_for(PieceType type, int sq, uint64_t occupied)
@@ -190,6 +202,35 @@ void generate_piece_moves(const Position& pos, MoveList& list, PieceType type)
     }
 }
 
+void generate_castling_moves(const Position& pos, MoveList& list)
+{
+    int base = (pos.side_to_move() == WHITE) ? 0 : 56;
+    Color us = pos.side_to_move();
+    auto them = static_cast<Color>(!us);
+    uint64_t occ = pos.occupied();
+    uint8_t rights = pos.castling_rights();
+    uint8_t kingsideRight  = (us == WHITE) ? WHITE_KINGSIDE  : BLACK_KINGSIDE;
+    uint8_t queensideRight = (us == WHITE) ? WHITE_QUEENSIDE : BLACK_QUEENSIDE;
+
+    if ((rights & (kingsideRight | queensideRight)) == 0 || is_square_attacked(pos, base + 4, them)) return;
+
+    if ((rights & kingsideRight)
+    && !(occ & (0x60ULL << base))
+    && !is_square_attacked(pos, base + 5, them)
+    && !is_square_attacked(pos, base + 6, them))
+    {
+        list.add(Move(base + 4, base + 6, NO_TYPE, CASTLE));
+    }
+
+    if ((rights & queensideRight)
+    && !(occ & (0x0EULL << base))
+    && !is_square_attacked(pos, base + 2, them)
+    && !is_square_attacked(pos, base + 3, them))
+    {
+        list.add(Move(base + 4, base + 2, NO_TYPE, CASTLE));
+    }
+}
+
 } // namespace
 
 void generate_moves(const Position& pos, MoveList& list)
@@ -200,5 +241,52 @@ void generate_moves(const Position& pos, MoveList& list)
     generate_piece_moves(pos, list, ROOK);
     generate_piece_moves(pos, list, QUEEN);
     generate_piece_moves(pos, list, KING);
-    // Castling comes next, once is_square_attacked exists.
+    generate_castling_moves(pos, list);
+}
+
+bool is_square_attacked(const Position& pos, int sq, Color by)
+{
+    uint64_t occ = pos.occupied();
+
+    uint64_t pawns   = pos.bitboard(get_piece(by, PAWN));
+    uint64_t knights = pos.bitboard(get_piece(by, KNIGHT));
+    uint64_t bishops = pos.bitboard(get_piece(by, BISHOP));
+    uint64_t rooks   = pos.bitboard(get_piece(by, ROOK));
+    uint64_t queens  = pos.bitboard(get_piece(by, QUEEN));
+    uint64_t king    = pos.bitboard(get_piece(by, KING));
+
+    if (knightAttacks[sq] & knights) return true;
+    if (kingAttacks[sq] & king) return true;
+    if (pawn_attacks(static_cast<Color>(!by), sq) & pawns) return true;
+    if (rook_attacks(sq, occ) & (rooks | queens)) return true;
+    if (bishop_attacks(sq, occ) & (bishops | queens)) return true;
+
+    return false;
+}
+
+void generate_legal_moves(Position& pos, MoveList& legal)
+{
+    MoveList moves;
+    generate_moves(pos, moves);
+
+    Color us = pos.side_to_move();
+    auto them = static_cast<Color>(!us);
+
+    for (auto move : moves)
+    {
+        pos.make_move(move);
+        int king_sq = std::countr_zero(pos.bitboard(get_piece(us, KING)));
+        if (!is_square_attacked(pos, king_sq, them))
+        {
+            legal.add(move);
+        }
+        pos.undo_move();
+    }
+}
+
+bool in_check(const Position& pos)
+{
+    Color us = pos.side_to_move();
+    int king_sq = std::countr_zero(pos.bitboard(get_piece(us, KING)));
+    return is_square_attacked(pos, king_sq, static_cast<Color>(!us));
 }

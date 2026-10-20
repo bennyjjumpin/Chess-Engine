@@ -1,12 +1,9 @@
-//
-// Created by Ben's PC on 10/18/2026.
-//
-
 #ifndef CHESS_POSITION_H
 #define CHESS_POSITION_H
 #include <cstdint>
 #include <array>
 #include <vector>
+#include <bits/basic_string.h>
 
 #include "types.h"
 #include "move.h"
@@ -35,6 +32,8 @@ private:
 
 public:
     Position();
+
+    Position(const std::string &fen);
 
     void make_move(Move move);
 

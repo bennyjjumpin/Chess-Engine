@@ -1,13 +1,8 @@
-//
-// Created by Ben's PC on 10/18/2026.
-//
-
 #ifndef CHESS_SEARCH_H
 #define CHESS_SEARCH_H
+#include "position.h"
 
-
-class search {
-};
-
+constexpr int INFINITY_SCORE = 1'000'000;
+constexpr int MATE_SCORE = 100'000;
 
 #endif //CHESS_SEARCH_H

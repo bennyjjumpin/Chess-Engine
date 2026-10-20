@@ -1,13 +1,10 @@
-//
-// Created by Ben's PC on 10/18/2026.
-//
-
 #ifndef CHESS_EVALUATE_H
 #define CHESS_EVALUATE_H
+#include "position.h"
 
-
-class evaluate {
-};
+// Static evaluation in centipawns (100 = one pawn), from the point of view
+// of the side to move: positive means the side to move is better.
+int evaluate(const Position& pos);
 
 
 #endif //CHESS_EVALUATE_H

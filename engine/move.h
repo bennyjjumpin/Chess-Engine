@@ -1,7 +1,3 @@
-//
-// Created by Ben's PC on 10/18/2026.
-//
-
 #ifndef CHESS_MOVE_H
 #define CHESS_MOVE_H
 #include "types.h"
