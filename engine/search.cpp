@@ -1,6 +1,7 @@
 #include "search.h"
 #include "evaluate.h"
 #include "movegen.h"
+#include "book.h"
 #include <algorithm>
 #include <chrono>
 
@@ -199,6 +200,10 @@ int search_root(Position& pos, int depth, Move& bestMove)
 
 Move find_best_move(Position& pos, int maxDepth, int timeLimitMs)
 {
+    Move bookMove = book_move(pos);
+    if (bookMove.from != bookMove.to)
+        return bookMove;
+
     MoveList moves;
     generate_legal_moves(pos, moves);
     if (moves.size() == 0)
