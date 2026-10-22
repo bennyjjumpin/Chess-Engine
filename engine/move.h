@@ -15,6 +15,7 @@ struct Move {
     [[nodiscard]] bool is_castle() const { return flag == CASTLE; }
     Move() = default;
     Move(uint8_t from, uint8_t to, PieceType promotion = NO_TYPE, MoveFlag flag = NORMAL) : from(from), to(to), promotion(promotion), flag(flag)  {}
+    bool operator==(const Move&) const = default;
 };
 
 struct MoveList {

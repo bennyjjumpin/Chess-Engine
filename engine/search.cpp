@@ -2,8 +2,23 @@
 #include "evaluate.h"
 #include "movegen.h"
 #include <algorithm>
+#include <chrono>
 
 namespace {
+
+using Clock = std::chrono::steady_clock;
+Clock::time_point gDeadline;
+bool gStop = false;
+uint64_t gNodes = 0;
+
+// Checks the clock every 2048 nodes, since reading it at every node is slow.
+// Once time is up, gStop stays set until the next search starts.
+bool time_up()
+{
+    if ((++gNodes & 2047) == 0 && Clock::now() >= gDeadline)
+        gStop = true;
+    return gStop;
+}
 
 bool is_capture(const Position& pos, Move m)
 {
@@ -53,6 +68,8 @@ void order_moves(const Position& pos, MoveList& moves)
 
 int quiescence(Position& pos, int alpha, int beta)
 {
+    if (time_up()) return 0;
+
     int standPat = evaluate(pos);
     if (standPat >= beta)
     {
@@ -89,6 +106,10 @@ int quiescence(Position& pos, int alpha, int beta)
 
 int negamax(Position& pos, int depth, int alpha, int beta, int ply)
 {
+    if (time_up()) return 0;
+
+    if (pos.is_draw()) return 0;
+
     if (depth == 0)
     {
         return quiescence(pos, alpha, beta);
@@ -127,34 +148,72 @@ int negamax(Position& pos, int depth, int alpha, int beta, int ply)
     }
     return alpha;
 }
-}
 
-Move find_best_move(Position& pos, int depth)
+// Searches one fixed depth. bestMove comes in holding the previous
+// iteration's best move, which is searched first, and is updated only
+// if this iteration finishes before time runs out.
+int search_root(Position& pos, int depth, Move& bestMove)
 {
     MoveList moves;
     generate_legal_moves(pos, moves);
-    
-    if (moves.size() == 0)
-        return Move(0, 0);
-
     order_moves(pos, moves);
 
-    Move bestMove = moves[0];
+    for (int i = 0; i < moves.size(); i++)
+    {
+        if (moves.moves[i] == bestMove)
+        {
+            // Slide everything before it down one slot, then put it first.
+            Move previousBest = moves.moves[i];
+            for (int j = i; j > 0; j--)
+                moves.moves[j] = moves.moves[j - 1];
+            moves.moves[0] = previousBest;
+            break;
+        }
+    }
+
     int alpha = -INFINITY_SCORE;
     int beta = INFINITY_SCORE;
+    Move best = moves[0];
 
     for (Move m : moves)
     {
         pos.make_move(m);
-
         int score = -negamax(pos, depth - 1, -beta, -alpha, 1);
         pos.undo_move();
+
+        if (gStop)
+            break;          // this iteration is incomplete, so don't trust it
 
         if (score > alpha)
         {
             alpha = score;
-            bestMove = m;
+            best = m;
         }
+    }
+
+    if (!gStop)
+        bestMove = best;
+    return alpha;
+}
+}
+
+Move find_best_move(Position& pos, int maxDepth, int timeLimitMs)
+{
+    MoveList moves;
+    generate_legal_moves(pos, moves);
+    if (moves.size() == 0)
+        return Move(0, 0);
+
+    gStop = false;
+    gNodes = 0;
+    gDeadline = Clock::now() + std::chrono::milliseconds(timeLimitMs);
+
+    Move bestMove = moves[0];   // a legal fallback even if depth 1 can't finish
+    for (int depth = 1; depth <= maxDepth; depth++)
+    {
+        search_root(pos, depth, bestMove);
+        if (gStop)
+            break;
     }
     return bestMove;
 }

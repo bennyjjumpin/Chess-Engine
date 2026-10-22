@@ -1,6 +1,9 @@
 #include "position.h"
 #include <sstream>
+#include <stdexcept>
 #include <string>
+
+#include "zobrist.h"
 
 namespace {
     constexpr std::array<uint8_t, 64> castlingMask = [] {
@@ -27,6 +30,8 @@ Position::Position()
     mCastlingRights = 0x0F;
     mTurn = WHITE;
     mEnPassantTarget = -1;
+    mHalfMoveClock = 0;
+    mHash = 0;
 
     constexpr std::array<PieceType, 8> backRank = {
         ROOK, KNIGHT, BISHOP, QUEEN, KING, BISHOP, KNIGHT, ROOK
@@ -39,13 +44,15 @@ Position::Position()
         put_piece(get_piece(BLACK, PAWN), file + 48);
         put_piece(get_piece(BLACK, backRank[file]), file + 56);
     }
+
+    mHash = compute_hash();
 }
 
 // Loads a position from a FEN string, for example the starting position:
 //   rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1
 // The six fields are: piece placement, side to move, castling rights,
-// en passant square, halfmove clock, and fullmove number. The last two
-// aren't tracked yet, so they're read past and ignored.
+// en passant square, halfmove clock, and fullmove number. The last one
+// isn't tracked yet, so it's read past and ignored.
 // Throws std::invalid_argument if the string is malformed.
 Position::Position(const std::string& fen)
 {
@@ -54,6 +61,8 @@ Position::Position(const std::string& fen)
     mCastlingRights = 0;
     mTurn = WHITE;
     mEnPassantTarget = -1;
+    mHalfMoveClock = 0;
+    mHash = 0;
 
     std::istringstream in(fen);
     std::string placement, side, castling, enPassant;
@@ -126,7 +135,19 @@ Position::Position(const std::string& fen)
         mEnPassantTarget = (enPassant[1] - '1') * 8 + (enPassant[0] - 'a');
     }
 
-    // 5 and 6 (halfmove clock, fullmove number) are optional and ignored for now.
+    // 5. Halfmove clock: moves since the last capture or pawn move.
+    //    It's optional, so if it's missing the clock just stays at 0.
+    int clock = 0;
+    if (in >> clock)
+    {
+        if (clock < 0)
+            throw std::invalid_argument("FEN halfmove clock can't be negative: " + fen);
+        mHalfMoveClock = clock;
+    }
+
+    mHash = compute_hash();
+
+    // 6. The fullmove number isn't needed by the engine, so it's ignored.
 }
 
 
@@ -134,10 +155,12 @@ void Position::put_piece(Piece p, int sq)
 {
     mPieces[sq] = p;
     set_bit(mBitboards[p], sq);
+    mHash ^= Zobrist::keys.piece[p][sq];
 }
 
 void Position::remove_piece(int sq)
 {
+    mHash ^= Zobrist::keys.piece[mPieces[sq]][sq];   // before mPieces[sq] is cleared
     clear_bit(mBitboards[mPieces[sq]], sq);
     mPieces[sq] = NO_PIECE;
 }
@@ -145,10 +168,20 @@ void Position::remove_piece(int sq)
 void Position::make_move(Move move)
 {
     int captureSq = move.to;
+
     if (move.flag == EN_PASSANT)
         captureSq = (mTurn == WHITE) ? move.to - 8 : move.to + 8;
 
-    mHistory.push_back(UndoInfo(move, mPieces[captureSq], mCastlingRights, mEnPassantTarget));
+    mHistory.push_back(UndoInfo(move, mPieces[captureSq], mCastlingRights, mEnPassantTarget, mHalfMoveClock, mHash));
+
+    if (get_type(mPieces[move.from]) == PAWN || mPieces[captureSq] != NO_PIECE)
+    {
+        mHalfMoveClock = 0;
+    }
+    else
+    {
+        mHalfMoveClock++;
+    }
 
     if (mPieces[captureSq] != NO_PIECE)
     {
@@ -179,7 +212,13 @@ void Position::make_move(Move move)
         }
     }
 
+    mHash ^= Zobrist::keys.castling[mCastlingRights];
     mCastlingRights &= castlingMask[move.from] & castlingMask[move.to];
+    mHash ^= Zobrist::keys.castling[mCastlingRights];
+
+    // XOR out the old en passant key, if there was a square.
+    if (mEnPassantTarget != -1)
+        mHash ^= Zobrist::keys.enPassant[mEnPassantTarget % 8];
 
     if (move.flag == DOUBLE_PUSH)
     {
@@ -190,6 +229,11 @@ void Position::make_move(Move move)
         mEnPassantTarget = -1;
     }
 
+    // XOR in the new en passant key, if this move created a square.
+    if (mEnPassantTarget != -1)
+        mHash ^= Zobrist::keys.enPassant[mEnPassantTarget % 8];
+
+    mHash ^= Zobrist::keys.blackToMove;
     mTurn = static_cast<Color>(!mTurn);
 }
 
@@ -208,6 +252,7 @@ void Position::undo_move()
 
     mCastlingRights = info.castlingRights;
     mEnPassantTarget = info.enPassantTarget;
+    mHalfMoveClock = info.halfMoveClock;
 
     if (info.move.is_castle())
     {
@@ -237,4 +282,79 @@ void Position::undo_move()
     {
         put_piece(info.capturedPiece, captureSq);
     }
+
+    mHash = info.hash;
+}
+
+// Builds the position's hash from scratch by XORing together the key for
+// everything that's true about it. This is the slow, obviously-correct
+// version: make_move keeps mHash updated incrementally instead, and this
+// is used to set the starting value and to check those updates in tests.
+uint64_t Position::compute_hash() const
+{
+    uint64_t hash = 0;
+
+    // Every piece on its square.
+    for (int p = 0; p < 12; p++)
+    {
+        uint64_t bb = mBitboards[p];   // a copy, so popping doesn't change the board
+        while (bb)
+        {
+            int sq = pop_lsb(bb);
+            hash ^= Zobrist::keys.piece[p][sq];
+        }
+    }
+
+    // Whose turn it is. Only black gets a key: "white to move" is the
+    // absence of it, which works because XORing it in twice cancels out.
+    if (mTurn == BLACK)
+        hash ^= Zobrist::keys.blackToMove;
+
+    // Castling rights. They're a 4-bit number, 0 to 15, so they can index
+    // the 16 castling keys directly.
+    hash ^= Zobrist::keys.castling[mCastlingRights];
+
+    // En passant, only if a square is set. The key is per file, since the
+    // rank is always 3 or 6 and adds no information.
+    if (mEnPassantTarget != -1)
+        hash ^= Zobrist::keys.enPassant[mEnPassantTarget % 8];
+
+    return hash;
+}
+
+// True if the current position occurred earlier in the game. In search, one
+// earlier occurrence is enough: if repeating was good once, it can be repeated again.
+bool Position::is_repetition() const
+{
+    int n = static_cast<int>(mHistory.size());
+    for (int back = 2; back <= mHalfMoveClock && back <= n; back += 2)
+    {
+        if (mHistory[n - back].hash == mHash)
+            return true;
+    }
+    return false;
+}
+
+bool Position::is_draw() const
+{
+    return mHalfMoveClock >= 100 || insufficient_material() || is_repetition();
+}
+
+// True if the current position has occurred three times in the game,
+// counting this one. This is the actual game rule; the search uses the
+// stricter is_repetition() instead.
+bool Position::is_threefold() const
+{
+    int n = static_cast<int>(mHistory.size());
+    int earlier = 0;
+    for (int back = 2; back <= mHalfMoveClock && back <= n; back += 2)
+    {
+        if (mHistory[n - back].hash == mHash)
+        {
+            earlier++;
+            if (earlier == 2)   // two earlier occurrences + the current one = three
+                return true;
+        }
+    }
+    return false;
 }

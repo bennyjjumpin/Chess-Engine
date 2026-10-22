@@ -1,5 +1,6 @@
 #include "perft.h"
 #include <cstdio>
+#include <cstdlib>
 #include "movegen.h"
 
 uint64_t perft(Position& pos, int depth)
@@ -55,4 +56,19 @@ std::string move_to_uci(Move move)
     if (move.is_promotion())
         s += "pnbrqk"[move.promotion];
     return s;
+}
+
+// Turns a UCI string like "e2e4" or "e7e8q" into the matching legal move.
+// Returns Move(0, 0) if the string doesn't match any legal move, so
+// illegal or garbled input from the player is rejected automatically.
+Move uci_to_move(Position& pos, const std::string& uci)
+{
+    MoveList moves;
+    generate_legal_moves(pos, moves);
+
+    for (Move m : moves)
+        if (move_to_uci(m) == uci)
+            return m;
+
+    return Move(0, 0);
 }

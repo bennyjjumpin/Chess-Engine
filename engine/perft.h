@@ -17,4 +17,7 @@ uint64_t perft_divide(Position& pos, int depth);
 // A move in UCI notation: "e2e4", or "e7e8q" for a promotion.
 std::string move_to_uci(Move move);
 
+// The legal move matching a UCI string, or Move(0, 0) if none matches.
+Move uci_to_move(Position& pos, const std::string& uci);
+
 #endif //CHESS_PERFT_H

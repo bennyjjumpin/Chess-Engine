@@ -11,6 +11,8 @@ add_library(engine STATIC
         engine/evaluate.cpp
         engine/search.cpp
         engine/perft.cpp
+        web/engine_web.cpp
+        engine/zobrist.h
 )
 target_include_directories(engine PUBLIC engine)
 
