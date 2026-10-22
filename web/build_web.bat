@@ -17,7 +17,7 @@ em++ -O3 -std=c++20 -fexceptions ^
   -I engine ^
   web\engine_web.cpp ^
   engine\position.cpp engine\movegen.cpp engine\evaluate.cpp ^
-  engine\search.cpp engine\perft.cpp ^
+  engine\search.cpp engine\perft.cpp engine\book.cpp^
   -lembind ^
   -sMODULARIZE=1 -sEXPORT_NAME=createEngine ^
   -sENVIRONMENT=web,worker,node ^
