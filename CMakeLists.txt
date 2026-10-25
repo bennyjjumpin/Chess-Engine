@@ -16,6 +16,7 @@ add_library(engine STATIC
         engine/book_lines.h
         engine/book.cpp
         engine/book.h
+        uci/main.cpp
 )
 target_include_directories(engine PUBLIC engine)
 
